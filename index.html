@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Объединение мастеров</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- ЭКРАН ВХОДА -->
+  <div id="login-screen" class="screen active">
+    <div class="login-box">
+      <div class="login-logo">
+        <span class="logo-icon">🔧</span>
+        <h1>Объединение мастеров</h1>
+        <p>Система учёта заявок</p>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="example@mail.ru">
+      </div>
+      <div class="form-group">
+        <label>Пароль</label>
+        <input type="password" id="login-password" placeholder="••••••••">
+      </div>
+      <button class="btn-primary" onclick="login()">Войти</button>
+      <div id="login-error" class="error-msg"></div>
+    </div>
+  </div>
+
+  <!-- ОСНОВНОЙ ИНТЕРФЕЙС -->
+  <div id="main-screen" class="screen">
+
+    <!-- САЙДБАР -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span>🔧</span>
+        <span>Объединение мастеров</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" onclick="showPage('dashboard')">
+          <span class="nav-icon">📊</span> Дашборд
+        </a>
+        <a href="#" class="nav-item" onclick="showPage('orders')">
+          <span class="nav-icon">📋</span> Заявки
+        </a>
+        <a href="#" class="nav-item" onclick="showPage('clients')">
+          <span class="nav-icon">👥</span> Клиенты
+        </a>
+        <a href="#" class="nav-item" onclick="showPage('masters')">
+          <span class="nav-icon">👨‍🔧</span> Мастера
+        </a>
+        <a href="#" class="nav-item" onclick="showPage('stats')">
+          <span class="nav-icon">📈</span> Статистика
+        </a>
+        <a href="#" class="nav-item admin-only" onclick="showPage('logs')">
+          <span class="nav-icon">📜</span> Логи
+        </a>
+        <a href="#" class="nav-item admin-only" onclick="showPage('users')">
+          <span class="nav-icon">⚙️</span> Пользователи
+        </a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="user-info">
+          <span class="nav-icon">👤</span>
+          <div>
+            <div id="user-name">Загрузка...</div>
+            <div id="user-role" class="user-role"></div>
+          </div>
+        </div>
+        <button class="btn-logout" onclick="logout()">Выйти</button>
+      </div>
+    </aside>
+
+    <!-- КОНТЕНТ -->
+    <main class="content">
+
+      <!-- ДАШБОРД -->
+      <div id="page-dashboard" class="page active">
+        <div class="page-header">
+          <h2>Дашборд</h2>
+          <span id="dashboard-date" class="date-label"></span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon">📋</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-total">0</div>
+              <div class="stat-label">Всего заявок</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🔄</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-active">0</div>
+              <div class="stat-label">Активных заявок</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-done">0</div>
+              <div class="stat-label">Завершено сегодня</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-revenue">0 ₽</div>
+              <div class="stat-label">Выручка сегодня</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-avg">0 ₽</div>
+              <div class="stat-label">Средний чек по городу</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🏦</div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-cash">0 ₽</div>
+              <div class="stat-label">В кассу сегодня</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <h3>Активные заявки</h3>
+            <div id="active-orders-list" class="orders-mini-list"></div>
+          </div>
+          <div class="card">
+            <h3>Статус мастеров</h3>
+            <div id="masters-status-list" class="masters-mini-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ЗАЯВКИ -->
+      <div id="page-orders" class="page">
+        <div class="page-header">
+          <h2>Заявки</h2>
+          <button class="btn-primary" onclick="openOrderModal()">+ Новая заявка</button>
+        </div>
+        <div class="filters">
+          <select id="filter-status" onchange="loadOrders()">
+            <option value="">Все статусы</option>
+            <option value="on_way">В пути</option>
+            <option value="in_work">В работе</option>
+            <option value="done">Завершена</option>
+            <option value="taken_equipment">Взял технику</option>
+          </select>
+          <select id="filter-type" onchange="loadOrders()">
+            <option value="">Все типы</option>
+            <option value="household">Бытовая техника</option>
+            <option value="computer">Компьютерная техника</option>
+          </select>
+          <input type="text" id="filter-search" placeholder="Поиск по клиенту, адресу..." oninput="loadOrders()">
+        </div>
+        <div id="orders-list" class="table-container"></div>
+      </div>
+
+      <!-- КЛИЕНТЫ -->
+      <div id="page-clients" class="page">
+        <div class="page-header">
+          <h2>Клиенты</h2>
+          <input type="text" id="client-search" placeholder="Поиск по имени или телефону..." oninput="loadClients()">
+        </div>
+        <div id="clients-list" class="table-container"></div>
+      </div>
+
+      <!-- МАСТЕРА -->
+      <div id="page-masters" class="page">
+        <div class="page-header">
+          <h2>Мастера</h2>
+          <button class="btn-primary" onclick="openMasterModal()">+ Добавить мастера</button>
+        </div>
+        <div id="masters-list" class="masters-grid"></div>
+      </div>
+
+      <!-- СТАТИСТИКА -->
+      <div id="page-stats" class="page">
+        <div class="page-header">
+          <h2>Статистика</h2>
+          <div class="date-filters">
+            <input type="date" id="stats-from">
+            <span>—</span>
+            <input type="date" id="stats-to">
+            <button class="btn-secondary" onclick="loadStats()">Применить</button>
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="card">
+            <h3>Заявки по районам</h3>
+            <canvas id="chart-districts"></canvas>
+          </div>
+          <div class="card">
+            <h3>Сравнение мастеров</h3>
+            <canvas id="chart-masters"></canvas>
+          </div>
+          <div class="card">
+            <h3>Выручка по дням</h3>
+            <canvas id="chart-revenue"></canvas>
+          </div>
+          <div class="card">
+            <h3>Типы заявок</h3>
+            <canvas id="chart-types"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ЛОГИ (только админ) -->
+      <div id="page-logs" class="page">
+        <div class="page-header">
+          <h2>Журнал действий</h2>
+          <input type="text" id="log-search" placeholder="Поиск..." oninput="loadLogs()">
+        </div>
+        <div id="logs-list" class="table-container"></div>
+      </div>
+
+      <!-- ПОЛЬЗОВАТЕЛИ (только админ) -->
+      <div id="page-users" class="page">
+        <div class="page-header">
+          <h2>Пользователи</h2>
+          <button class="btn-primary" onclick="openUserModal()">+ Добавить пользователя</button>
+        </div>
+        <div id="users-list" class="table-container"></div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- МОДАЛЬНЫЕ ОКНА -->
+
+  <!-- Заявка -->
+  <div id="modal-order" class="modal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3 id="modal-order-title">Новая заявка</h3>
+        <button class="modal-close" onclick="closeModal('modal-order')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Тип заявки *</label>
+            <select id="order-type">
+              <option value="household">Бытовая техника</option>
+              <option value="computer">Компьютерная техника</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Мастер *</label>
+            <select id="order-master"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>ФИО клиента *</label>
+            <input type="text" id="order-client-name" placeholder="Иванов Иван Иванович" oninput="checkClient()">
+          </div>
+          <div class="form-group">
+            <label>Телефон *</label>
+            <input type="text" id="order-client-phone" placeholder="+7 999 999 99 99" oninput="checkClient()">
+          </div>
+        </div>
+        <div id="client-warning" class="client-warning hidden"></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Адрес *</label>
+            <input type="text" id="order-address" placeholder="ул. Ленина, 1, кв. 1">
+          </div>
+          <div class="form-group">
+            <label>Район *</label>
+            <input type="text" id="order-district" placeholder="Центральный">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Примечания</label>
+          <textarea id="order-notes" placeholder="Описание проблемы..."></textarea>
+        </div>
+
+        <div class="form-divider">Финансы (заполняется при завершении)</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Общая сумма (₽)</label>
+            <input type="number" id="order-total" placeholder="0" oninput="calcOrder()">
+          </div>
+          <div class="form-group">
+            <label>Сумма запчастей (₽)</label>
+            <input type="number" id="order-parts" placeholder="0" oninput="calcOrder()">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>% мастеру</label>
+            <input type="number" id="order-percent" value="50" min="0" max="100" oninput="calcOrder()">
+          </div>
+          <div class="form-group">
+            <label>Статус</label>
+            <select id="order-status">
+              <option value="on_way">В пути</option>
+              <option value="in_work">В работе</option>
+              <option value="done">Завершена</option>
+              <option value="taken_equipment">Взял технику с собой</option>
+            </select>
+          </div>
+        </div>
+        <div class="calc-result" id="calc-result"></div>
+
+        <div class="form-divider">Фото</div>
+        <input type="file" id="order-photos" multiple accept="image/*">
+        <div id="photos-preview" class="photos-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('modal-order')">Отмена</button>
+        <button class="btn-primary" onclick="saveOrder()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Мастер -->
+  <div id="modal-master" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-master-title">Новый мастер</h3>
+        <button class="modal-close" onclick="closeModal('modal-master')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>ФИО *</label>
+          <input type="text" id="master-name" placeholder="Иванов Иван Иванович">
+        </div>
+        <div class="form-group">
+          <label>Телефон</label>
+          <input type="text" id="master-phone" placeholder="+7 999 999 99 99">
+        </div>
+        <div class="form-group">
+          <label>Профиль *</label>
+          <select id="master-profile">
+            <option value="household">Бытовая техника</option>
+            <option value="computer">Компьютерная техника</option>
+            <option value="both">Оба профиля</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Статус</label>
+          <select id="master-status">
+            <option value="free">Свободен</option>
+            <option value="assigned">Назначен на заявку</option>
+            <option value="working">В работе</option>
+            <option value="dayoff">Выходной</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>% по умолчанию</label>
+          <input type="number" id="master-percent" value="50" min="0" max="100">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('modal-master')">Отмена</button>
+        <button class="btn-primary" onclick="saveMaster()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Пользователь -->
+  <div id="modal-user" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Новый пользователь</h3>
+        <button class="modal-close" onclick="closeModal('modal-user')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>ФИО *</label>
+          <input type="text" id="user-fullname" placeholder="Иванов Иван Иванович">
+        </div>
+        <div class="form-group">
+          <label>Email *</label>
+          <input type="email" id="user-email" placeholder="example@mail.ru">
+        </div>
+        <div class="form-group">
+          <label>Пароль *</label>
+          <input type="password" id="user-password" placeholder="Минимум 6 символов">
+        </div>
+        <div class="form-group">
+          <label>Роль *</label>
+          <select id="user-role">
+            <option value="dispatcher">Диспетчер</option>
+            <option value="admin">Администратор</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('modal-user')">Отмена</button>
+        <button class="btn-primary" onclick="saveUser()">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Просмотр заявки -->
+  <div id="modal-view-order" class="modal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3 id="view-order-title">Заявка</h3>
+        <button class="modal-close" onclick="closeModal('modal-view-order')">✕</button>
+      </div>
+      <div class="modal-body" id="view-order-body"></div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('modal-view-order')">Закрыть</button>
+        <button class="btn-primary" onclick="editCurrentOrder()">Редактировать</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
