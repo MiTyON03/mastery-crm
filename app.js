@@ -398,4 +398,406 @@ async function viewOrder(id) {
 function editCurrentOrder() {
   closeModal('modal-view-order');
   if (currentOrderId) openOrderModal(currentOrderId);
+
+// ==========================================
+// ИСПРАВЛЕНИЕ ОШИБОК МОДАЛЬНЫХ ОКОН
+// ==========================================
+
+// Переопределяем функции для модалок (должны быть глобальными)
+window.openOrderModal = async function(id = null) {
+  currentOrderId = id;
+  document.getElementById('modal-order-title').textContent = id ? 'Редактировать заявку' : 'Новая заявка';
+  document.getElementById('calc-result').classList.remove('visible');
+  document.getElementById('photos-preview').innerHTML = '';
+  document.getElementById('client-warning').className = 'client-warning hidden';
+
+  // Загружаем мастеров
+  const { data: masters } = await sb.from('masters').select('*').order('full_name');
+  const masterSelect = document.getElementById('order-master');
+  masterSelect.innerHTML = '<option value="">— Выбрать мастера —</option>' +
+    (masters || []).map(m => `<option value="${m.id}">${m.full_name} (${MASTER_PROFILE_LABELS[m.profile]})</option>`).join('');
+
+  if (id) {
+    const { data: order } = await sb.from('orders')
+      .select(`*, clients(*)`)
+      .eq('id', id)
+      .single();
+
+    if (order) {
+      document.getElementById('order-type').value = order.type || 'household';
+      document.getElementById('order-master').value = order.master_id || '';
+      document.getElementById('order-client-name').value = order.clients?.full_name || '';
+      document.getElementById('order-client-phone').value = order.clients?.phone || '';
+      document.getElementById('order-address').value = order.address || '';
+      document.getElementById('order-district').value = order.district || '';
+      document.getElementById('order-notes').value = order.notes || '';
+      document.getElementById('order-total').value = order.total_amount || '';
+      document.getElementById('order-parts').value = order.parts_amount || '';
+      document.getElementById('order-percent').value = order.master_percent || 50;
+      document.getElementById('order-status').value = order.status || 'on_way';
+      calcOrder();
+
+      // Загружаем фото
+      const { data: photos } = await sb.from('order_photos')
+        .select('*').eq('order_id', id);
+      if (photos && photos.length > 0) {
+        const preview = document.getElementById('photos-preview');
+        preview.innerHTML = photos.map(p =>
+          `<img src="${p.url}" onclick="window.open('${p.url}','_blank')">`
+        ).join('');
+      }
+    }
+  } else {
+    // Сброс формы
+    document.getElementById('order-type').value = 'household';
+    document.getElementById('order-master').value = '';
+    document.getElementById('order-client-name').value = '';
+    document.getElementById('order-client-phone').value = '';
+    document.getElementById('order-address').value = '';
+    document.getElementById('order-district').value = '';
+    document.getElementById('order-notes').value = '';
+    document.getElementById('order-total').value = '';
+    document.getElementById('order-parts').value = '';
+    document.getElementById('order-percent').value = 50;
+    document.getElementById('order-status').value = 'on_way';
+  }
+
+  openModal('modal-order');
+};
+
+window.openMasterModal = async function(id = null) {
+  document.getElementById('modal-master-title').textContent = id ? 'Редактировать мастера' : 'Новый мастер';
+
+  if (id) {
+    const { data: master } = await sb.from('masters').select('*').eq('id', id).single();
+    if (master) {
+      document.getElementById('master-name').value = master.full_name;
+      document.getElementById('master-phone').value = master.phone || '';
+      document.getElementById('master-profile').value = master.profile;
+      document.getElementById('master-status').value = master.status;
+      document.getElementById('master-percent').value = master.default_percent || 50;
+    }
+  } else {
+    document.getElementById('master-name').value = '';
+    document.getElementById('master-phone').value = '';
+    document.getElementById('master-profile').value = 'household';
+    document.getElementById('master-status').value = 'free';
+    document.getElementById('master-percent').value = 50;
+  }
+
+  currentOrderId = id;
+  openModal('modal-master');
+};
+
+window.openUserModal = function() {
+  document.getElementById('user-fullname').value = '';
+  document.getElementById('user-email').value = '';
+  document.getElementById('user-password').value = '';
+  document.getElementById('user-role').value = 'dispatcher';
+  openModal('modal-user');
+};
+
+// Исправляем сохранение заявки
+window.saveOrder = async function() {
+  const clientName = document.getElementById('order-client-name').value.trim();
+  const clientPhone = document.getElementById('order-client-phone').value.trim();
+  const address = document.getElementById('order-address').value.trim();
+  const district = document.getElementById('order-district').value.trim();
+  const masterId = document.getElementById('order-master').value;
+  const type = document.getElementById('order-type').value;
+  const status = document.getElementById('order-status').value;
+  const total = parseFloat(document.getElementById('order-total').value) || 0;
+  const parts = parseFloat(document.getElementById('order-parts').value) || 0;
+  const percent = parseInt(document.getElementById('order-percent').value) || 50;
+  const notes = document.getElementById('order-notes').value.trim();
+
+  if (!clientName || !clientPhone || !address || !district) {
+    showToast('Заполните обязательные поля', 'error');
+    return;
+  }
+
+  if (!masterId) {
+    showToast('Выберите мастера', 'error');
+    return;
+  }
+
+  // Проверяем клиента
+  let clientId = null;
+  let isRepeat = false;
+
+  const { data: existingClients } = await sb.from('clients')
+    .select('*')
+    .or(`phone.eq.${clientPhone},address.eq.${address}`);
+
+  if (existingClients && existingClients.length > 0) {
+    const existing = existingClients[0];
+    clientId = existing.id;
+    isRepeat = true;
+
+    if (!currentOrderId) {
+      await sb.from('clients')
+        .update({ visits_count: (existing.visits_count || 1) + 1 })
+        .eq('id', existing.id);
+    }
+  } else {
+    const { data: newClient } = await sb.from('clients').insert({
+      full_name: clientName,
+      phone: clientPhone,
+      address: address,
+      district: district,
+      visits_count: 1
+    }).select().single();
+
+    if (newClient) clientId = newClient.id;
+  }
+
+  const orderData = {
+    type,
+    status,
+    is_repeat: isRepeat,
+    client_id: clientId,
+    master_id: masterId,
+    dispatcher_id: currentUser.id,
+    district,
+    address,
+    total_amount: total,
+    parts_amount: parts,
+    master_percent: percent,
+    notes,
+    completed_at: status === 'done' ? new Date().toISOString() : null
+  };
+
+  let orderId = currentOrderId;
+  let oldData = null;
+
+  if (currentOrderId) {
+    const { data: old } = await sb.from('orders').select('*').eq('id', currentOrderId).single();
+    oldData = old;
+    await sb.from('orders').update(orderData).eq('id', currentOrderId);
+  } else {
+    const { data: newOrder } = await sb.from('orders').insert(orderData).select().single();
+    if (newOrder) orderId = newOrder.id;
+  }
+
+  // Загружаем фото
+  const photoInput = document.getElementById('order-photos');
+  if (photoInput.files.length > 0 && orderId) {
+    await uploadPhotos(photoInput.files, orderId);
+  }
+
+  // Обновляем статус мастера
+  if (masterId) {
+    let masterStatus = 'assigned';
+    if (status === 'in_work') masterStatus = 'working';
+    if (status === 'done' || status === 'taken_equipment') masterStatus = 'free';
+    await sb.from('masters').update({ status: masterStatus }).eq('id', masterId);
+  }
+
+  await writeLog(
+    currentOrderId ? 'Обновил заявку' : 'Создал заявку',
+    'order',
+    orderId,
+    oldData,
+    orderData
+  );
+
+  showToast(currentOrderId ? 'Заявка обновлена' : 'Заявка создана', 'success');
+  closeModal('modal-order');
+  loadOrders();
+  loadDashboard();
+};
+
+// Исправляем сохранение мастера
+window.saveMaster = async function() {
+  const name = document.getElementById('master-name').value.trim();
+  const phone = document.getElementById('master-phone').value.trim();
+  const profile = document.getElementById('master-profile').value;
+  const status = document.getElementById('master-status').value;
+  const percent = parseInt(document.getElementById('master-percent').value) || 50;
+
+  if (!name) {
+    showToast('Введите ФИО мастера', 'error');
+    return;
+  }
+
+  const masterData = {
+    full_name: name,
+    phone,
+    profile,
+    status,
+    default_percent: percent
+  };
+
+  if (currentOrderId) {
+    await sb.from('masters').update(masterData).eq('id', currentOrderId);
+    await writeLog('Обновил мастера', 'master', currentOrderId, null, masterData);
+    showToast('Мастер обновлён', 'success');
+  } else {
+    const { data: newMaster } = await sb.from('masters').insert(masterData).select().single();
+    await writeLog('Добавил мастера', 'master', newMaster?.id, null, masterData);
+    showToast('Мастер добавлен', 'success');
+  }
+
+  closeModal('modal-master');
+  loadMasters();
+};
+
+// Исправляем сохранение пользователя
+window.saveUser = async function() {
+  const fullName = document.getElementById('user-fullname').value.trim();
+  const email = document.getElementById('user-email').value.trim();
+  const password = document.getElementById('user-password').value;
+  const role = document.getElementById('user-role').value;
+
+  if (!fullName || !email || !password) {
+    showToast('Заполните все поля', 'error');
+    return;
+  }
+
+  if (password.length < 6) {
+    showToast('Пароль минимум 6 символов', 'error');
+    return;
+  }
+
+  const { data, error } = await sb.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true
+  });
+
+  if (error) {
+    const { data: signUpData, error: signUpError } = await sb.auth.signUp({
+      email,
+      password
+    });
+
+    if (signUpError) {
+      showToast('Ошибка создания пользователя: ' + signUpError.message, 'error');
+      return;
+    }
+
+    if (signUpData.user) {
+      await sb.from('profiles').insert({
+        id: signUpData.user.id,
+        full_name: fullName,
+        role
+      });
+    }
+  } else if (data.user) {
+    await sb.from('profiles').insert({
+      id: data.user.id,
+      full_name: fullName,
+      role
+    });
+  }
+
+  await writeLog('Создал пользователя', 'user', null, null, { email, role });
+  showToast('Пользователь создан', 'success');
+  closeModal('modal-user');
+  loadUsers();
+};
+
+// Добавляем функции просмотра и удаления в window
+window.viewOrder = async function(id) {
+  const { data: order } = await sb.from('orders')
+    .select(`*, clients(*), masters(full_name), profiles(full_name)`)
+    .eq('id', id)
+    .single();
+
+  if (!order) return;
+
+  const { data: photos } = await sb.from('order_photos')
+    .select('*')
+    .eq('order_id', id);
+
+  currentOrderId = id;
+
+  document.getElementById('view-order-title').textContent = `Заявка #${order.order_number}`;
+
+  document.getElementById('view-order-body').innerHTML = `
+    <div class="view-section">
+      <h4>Основная информация</h4>
+      <div class="view-row"><span class="label">Тип</span><span class="value">${TYPE_LABELS[order.type]}</span></div>
+      <div class="view-row"><span class="label">Статус</span><span class="value"><span class="badge badge-${order.status}">${STATUS_LABELS[order.status]}</span></span></div>
+      <div class="view-row"><span class="label">Повторная</span><span class="value">${order.is_repeat ? '✅ Да' : 'Нет'}</span></div>
+      <div class="view-row"><span class="label">Диспетчер</span><span class="value">${order.profiles?.full_name || '—'}</span></div>
+      <div class="view-row"><span class="label">Дата создания</span><span class="value">${formatDate(order.created_at)}</span></div>
+    </div>
+
+    <div class="view-section">
+      <h4>Клиент</h4>
+      <div class="view-row"><span class="label">ФИО</span><span class="value">${order.clients?.full_name || '—'}</span></div>
+      <div class="view-row"><span class="label">Телефон</span><span class="value">${order.clients?.phone || '—'}</span></div>
+      <div class="view-row"><span class="label">Адрес</span><span class="value">${order.address || '—'}</span></div>
+      <div class="view-row"><span class="label">Район</span><span class="value">${order.district || '—'}</span></div>
+      ${order.clients?.is_problem ? `<div class="view-row"><span class="label">⚠️ Проблемный</span><span class="value" style="color:var(--danger)">${order.clients.problem_reason || 'Да'}</span></div>` : ''}
+    </div>
+
+    <div class="view-section">
+      <h4>Мастер</h4>
+      <div class="view-row"><span class="label">Мастер</span><span class="value">${order.masters?.full_name || '—'}</span></div>
+      <div class="view-row"><span class="label">% мастеру</span><span class="value">${order.master_percent}%</span></div>
+    </div>
+
+    <div class="view-section">
+      <h4>Финансы</h4>
+      <div class="view-row"><span class="label">Общая сумма</span><span class="value">${formatMoney(order.total_amount)}</span></div>
+      <div class="view-row"><span class="label">Запчасти</span><span class="value">${formatMoney(order.parts_amount)}</span></div>
+      <div class="view-row"><span class="label">Чистая сумма</span><span class="value">${formatMoney(order.net_amount)}</span></div>
+      <div class="view-row"><span class="label">Мастеру</span><span class="value" style="color:var(--success)">${formatMoney(order.master_payment)}</span></div>
+      <div class="view-row"><span class="label">В кассу</span><span class="value" style="color:var(--primary)">${formatMoney(order.cash_payment)}</span></div>
+    </div>
+
+    ${order.notes ? `
+    <div class="view-section">
+      <h4>Примечания</h4>
+      <p style="font-size:14px">${order.notes}</p>
+    </div>` : ''}
+
+    ${photos && photos.length > 0 ? `
+    <div class="view-section">
+      <h4>Фото</h4>
+      <div class="view-photos">
+        ${photos.map(p => `<img src="${p.url}" onclick="window.open('${p.url}', '_blank')">`).join('')}
+      </div>
+    </div>` : ''}
+  `;
+
+  openModal('modal-view-order');
+};
+
+window.editCurrentOrder = function() {
+  closeModal('modal-view-order');
+  if (currentOrderId) openOrderModal(currentOrderId);
+};
+
+window.deleteOrder = async function(id) {
+  if (!confirm('Удалить заявку? Это действие нельзя отменить.')) return;
+
+  await sb.from('order_photos').delete().eq('order_id', id);
+  await sb.from('orders').delete().eq('id', id);
+  await writeLog('Удалил заявку', 'order', id, null, null);
+
+  showToast('Заявка удалена', 'success');
+  loadOrders();
+  loadDashboard();
+};
+
+window.toggleProblemClient = async function(id, isProblem) {
+  if (!isProblem) {
+    const reason = prompt('Укажите причину (проблемный клиент):');
+    if (reason === null) return;
+    await sb.from('clients').update({
+      is_problem: true,
+      problem_reason: reason
+    }).eq('id', id);
+    await writeLog('Пометил клиента как проблемного', 'client', id, null, { reason });
+    showToast('Клиент помечен как проблемный', 'warning');
+  } else {
+    if (!confirm('Снять пометку "проблемный клиент"?')) return;
+    await sb.from('clients').update({
+      is_problem: false,
+      problem_reason: null
+    }).eq('id', id);
+  
 }
